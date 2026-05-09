@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# ── Single detected object ──────────────────────────────────────────
+#  Single detected object 
 @dataclass
 class Detection:
     bbox: tuple        # (x1, y1, x2, y2)
@@ -22,7 +22,7 @@ class Detection:
         self.height  = y2 - y1
 
 
-# ── All detections for one frame ────────────────────────────────────
+#  All detections for one frame 
 @dataclass
 class FrameDetections:
     frame_idx: int
@@ -32,7 +32,7 @@ class FrameDetections:
     ball:      Optional[Detection]
 
 
-# ── Main Detector ───────────────────────────────────────────────────
+#  Main Detector
 class PadelDetector:
 
     # YOLO COCO class IDs
@@ -48,13 +48,13 @@ class PadelDetector:
         except Exception as e:
             logger.warning(f"YOLO not available ({e}) — using color fallback")
 
-    # ── Main entry point ────────────────────────────────────────────
+    #  Main entry point
     def detect(self, frame, frame_idx, timestamp) -> FrameDetections:
         if self.model:
             return self._yolo(frame, frame_idx, timestamp)
         return self._fallback(frame, frame_idx, timestamp)
 
-    # ── YOLO path ───────────────────────────────────────────────────
+    #  YOLO path
     def _yolo(self, frame, frame_idx, timestamp) -> FrameDetections:
         results = self.model.track(frame, persist=True,
                                    conf=self.conf, verbose=False)
@@ -85,7 +85,7 @@ class PadelDetector:
 
         return FrameDetections(frame_idx, timestamp, players, rackets, ball)
 
-    # ── Fallback: pure OpenCV color/shape detection ─────────────────
+    # Fallback: pure OpenCV color/shape detection 
     def _fallback(self, frame, frame_idx, timestamp) -> FrameDetections:
         ball    = self._find_ball(frame)
         players = self._find_players(frame)
