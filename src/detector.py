@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-#  Single detected object 
+# one detected object (player, ball, or racket)
 @dataclass
 class Detection:
     bbox: tuple        # (x1, y1, x2, y2)
@@ -18,11 +18,11 @@ class Detection:
     def __post_init__(self):
         x1, y1, x2, y2 = self.bbox
         self.center = ((x1 + x2) // 2, (y1 + y2) // 2)
-        self.width   = x2 - x1
-        self.height  = y2 - y1
+        self.width  = x2 - x1
+        self.height = y2 - y1
 
 
-#  All detections for one frame 
+# all detections for one frame
 @dataclass
 class FrameDetections:
     frame_idx: int
@@ -30,12 +30,12 @@ class FrameDetections:
     players:   list
     rackets:   list
     ball:      Optional[Detection]
+    raw_frame: Optional[object] = None
 
 
-#  Main Detector
 class PadelDetector:
 
-    # YOLO COCO class IDs
+    # YOLO class IDs from the COCO dataset
     CLASS_MAP = {0: "player", 32: "ball", 38: "racket"}
 
     def __init__(self, model_path="yolov8n.pt", conf=0.35):
@@ -44,20 +44,18 @@ class PadelDetector:
         try:
             from ultralytics import YOLO
             self.model = YOLO(model_path)
-            logger.info("YOLO loaded OK")
+            logger.info("YOLO loaded")
         except Exception as e:
             logger.warning(f"YOLO not available ({e}) — using color fallback")
 
-    #  Main entry point
     def detect(self, frame, frame_idx, timestamp) -> FrameDetections:
         if self.model:
             return self._yolo(frame, frame_idx, timestamp)
         return self._fallback(frame, frame_idx, timestamp)
 
-    #  YOLO path
+    # YOLO detection 
     def _yolo(self, frame, frame_idx, timestamp) -> FrameDetections:
-        results = self.model.track(frame, persist=True,
-                                   conf=self.conf, verbose=False)
+        results = self.model.track(frame, persist=True, conf=self.conf, verbose=False)
         players, rackets, ball = [], [], None
 
         for r in results:
@@ -65,7 +63,6 @@ class PadelDetector:
                 cls_id = int(box.cls[0])
                 if cls_id not in self.CLASS_MAP:
                     continue
-
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 det = Detection(
                     bbox       = (x1, y1, x2, y2),
@@ -73,11 +70,9 @@ class PadelDetector:
                     class_name = self.CLASS_MAP[cls_id],
                     track_id   = int(box.id[0]) if box.id is not None else None,
                 )
-
                 if cls_id == 0:
                     players.append(det)
                 elif cls_id == 32:
-                    # keep only the most confident ball
                     if ball is None or det.confidence > ball.confidence:
                         ball = det
                 elif cls_id == 38:
@@ -85,7 +80,7 @@ class PadelDetector:
 
         return FrameDetections(frame_idx, timestamp, players, rackets, ball)
 
-    # Fallback: pure OpenCV color/shape detection 
+    # Fallback: OpenCV color + shape detection (no YOLO needed) 
     def _fallback(self, frame, frame_idx, timestamp) -> FrameDetections:
         ball    = self._find_ball(frame)
         players = self._find_players(frame)
@@ -93,14 +88,12 @@ class PadelDetector:
         return FrameDetections(frame_idx, timestamp, players, rackets, ball)
 
     def _find_ball(self, frame):
-        """Detect ball by yellow-green color + circularity check."""
+        # look for yellow-green round object = ball
         hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array([25, 80, 80]),
-                                np.array([65, 255, 255]))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                np.ones((5, 5), np.uint8))
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
+        mask = cv2.inRange(hsv, np.array([25, 80, 80]), np.array([65, 255, 255]))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         best = None
         for cnt in contours:
             area = cv2.contourArea(cnt)
@@ -110,20 +103,19 @@ class PadelDetector:
             circularity = area / (np.pi * radius ** 2 + 1e-5)
             if circularity > 0.5:
                 x, y, w, h = cv2.boundingRect(cnt)
-                det = Detection((x, y, x+w, y+h), circularity, "ball")
+                det = Detection((x, y, x + w, y + h), circularity, "ball")
                 if best is None or det.confidence > best.confidence:
                     best = det
         return best
 
     def _find_players(self, frame):
-        """Detect players by finding large upright blobs."""
+        # look for large upright blobs = players
         h, w  = frame.shape[:2]
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blur  = cv2.GaussianBlur(gray, (21, 21), 0)
-        _, th = cv2.threshold(blur, 0, 255,
-                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
+        _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         players = []
         for i, cnt in enumerate(contours):
             area = cv2.contourArea(cnt)
@@ -131,16 +123,13 @@ class PadelDetector:
                 continue
             x, y, bw, bh = cv2.boundingRect(cnt)
             if bh / (bw + 1e-5) > 1.2 and y > h * 0.1:
-                players.append(Detection((x, y, x+bw, y+bh),
-                                         0.6, "player", track_id=i))
-        return players[:4]  # max 4 in padel
+                players.append(Detection((x, y, x + bw, y + bh), 0.6, "player", track_id=i))
+        return players[:4]
 
     def _guess_rackets(self, players):
-        """Estimate racket location from upper body of each player."""
+        # assume racket is in the top third of each player box
         rackets = []
         for p in players:
             x1, y1, x2, y2 = p.bbox
-            # racket lives in top-third of player box
-            rackets.append(Detection((x1, y1, x2, y1 + (y2-y1)//3),
-                                      0.4, "racket", track_id=p.track_id))
+            rackets.append(Detection((x1, y1, x2, y1 + (y2 - y1) // 3), 0.4, "racket", track_id=p.track_id))
         return rackets
