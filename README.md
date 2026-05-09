@@ -207,19 +207,7 @@ This draws coloured boxes around players and the ball, shows the ball's path as 
 | Pandas / csv | Saving data to CSV |
 | tqdm | Progress bar in terminal |
 
-### What Was Simplified
 
-The original version of this code had extra complexity that wasn't needed for the core task. Here's what was removed to keep it clean:
-
-- **Removed MediaPipe pose estimation** — it added 60+ lines and rarely improved results over the simpler racket-position approach
-- **Removed `class_id` from Detection** — the class name is enough, the number isn't needed anywhere
-- **Removed `BallTracker.arc()`** — the simpler `is_going_up()` check covers the same logic
-- **Removed `confidence` score from ShotEvent** — it wasn't being used in any output
-- **Removed verbose debug logging** — kept only essential info logs
-
-Everything the assignment asks for still works: detection, classification of 3+ shot types, player association, JSON/CSV output, and annotated video.
-
----
 
 ## Challenges Faced
 
