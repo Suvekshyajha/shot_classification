@@ -1,13 +1,150 @@
 # Padel Game Analytics — Shot Classification System
-### Approach Explanation
+
+A computer vision system that analyses padel match footage and classifies shot types (forehand, backhand, smash, serve, lob) using YOLOv8 and OpenCV.
 
 ---
 
 ## Table of Contents
-1. [Methodology](#methodology)
-2. [System Architecture](#system-architecture)
-3. [Challenges Faced](#challenges-faced)
-4. [Improvements I Would Make](#improvements-i-would-make)
+
+1. [Project Structure](#project-structure)
+2. [Setup & Installation](#setup--installation)
+3. [How to Run](#how-to-run)
+4. [Output Files](#output-files)
+5. [Methodology](#methodology)
+6. [Challenges Faced](#challenges-faced)
+7. [Improvements I Would Make](#improvements-i-would-make)
+
+---
+
+## Project Structure
+
+```
+shot/
+├── src/
+│   ├── __init__.py       # exposes main classes
+│   ├── detector.py       # finds players, ball, rackets in each frame
+│   ├── classifier.py     # decides what shot was played
+│   ├── pipeline.py       # runs everything frame by frame
+│   ├── analytics.py      # counts and summarises all shots
+│   └── visualizer.py     # draws boxes, trail, labels on video
+├── models/               # put yolov8n.pt here
+├── data/                 # put your input video here
+├── outputs/              # JSON, CSV, annotated video saved here
+├── main.py               # entry point — run this
+├── pyproject.toml
+└── .gitignore
+```
+
+> `models/`, `data/`, and `outputs/` are in `.gitignore` — they won't be pushed to GitHub. Download the YOLO model separately and put your video in `data/`.
+
+---
+
+## Setup & Installation
+
+**Requirements:** Python 3.10+, [uv](https://github.com/astral-sh/uv)
+
+**1. Clone the repo**
+```bash
+git clone https://github.com/Suvekshyajha/shot_classification.git
+cd shot_classification
+```
+
+**2. Install dependencies**
+```bash
+uv add ultralytics opencv-python numpy pandas tqdm
+```
+
+**3. Download YOLO model**
+
+Download `yolov8n.pt` from [Ultralytics](https://github.com/ultralytics/assets/releases) and place it in the `models/` folder.
+
+**4. Add your video**
+
+Put your padel match video inside the `data/` folder.
+
+---
+
+## How to Run
+
+```bash
+uv run main.py --video data/your_video.mp4 --model models/yolov8n.pt
+```
+
+**Options:**
+
+| Flag | What it does | Default |
+|---|---|---|
+| `--video` | Path to input video | required |
+| `--model` | Path to YOLO weights | `models/yolov8n.pt` |
+| `--conf` | Detection confidence threshold | `0.35` |
+| `--output` | Folder to save results | `outputs/` |
+| `--no-annotate` | Skip writing annotated video | off |
+| `--max-frames` | Process only first N frames (good for testing) | all frames |
+
+**Test with just 200 frames first:**
+```bash
+uv run main.py --video data/your_video.mp4 --max-frames 200
+```
+
+**Skip annotated video to run faster:**
+```bash
+uv run main.py --video data/your_video.mp4 --no-annotate
+```
+
+---
+
+## Output Files
+
+After running, the `outputs/` folder will contain:
+
+| File | What's in it |
+|---|---|
+| `*_shots.json` | Every detected shot with frame, time, type, speed, zone, direction |
+| `*_shots.csv` | Same data as a spreadsheet — open in Excel |
+| `*_annotated.mp4` | Original video with boxes, ball trail, and shot labels drawn on it |
+
+**Example JSON entry:**
+```json
+{
+  "shot_id": 3,
+  "frame": 142,
+  "time_sec": 4.73,
+  "shot_type": "forehand",
+  "player_id": 1,
+  "ball_x": 640,
+  "ball_y": 380,
+  "speed_kmh": 54.2,
+  "zone": "mid",
+  "side": "right",
+  "direction": "cross_court"
+}
+```
+
+**Terminal summary after run:**
+```
+==================================================
+       PADEL ANALYTICS — RESULTS
+==================================================
+  Video      : data/match.mp4
+  Duration   : 62.3s
+  Processed  : 18.4s
+--------------------------------------------------
+  Total Shots: 23
+  Shots/min  : 22.2
+--------------------------------------------------
+  Shot Breakdown:
+    forehand      9  █████████ 39.1%
+    backhand      7  ███████ 30.4%
+    smash         4  ████ 17.4%
+    serve         2  ██ 8.7%
+    lob           1  █ 4.3%
+--------------------------------------------------
+  Outputs saved:
+    json     → outputs/match_shots.json
+    csv      → outputs/match_shots.csv
+    video    → outputs/match_annotated.mp4
+==================================================
+```
 
 ---
 
@@ -15,9 +152,9 @@
 
 ### Overview
 
-The basic idea is simple — take a padel match video, go through it frame by frame, figure out where the players and ball are, and then try to guess what kind of shot was just played (forehand, backhand, or smash).
+The basic idea is simple — take a padel match video, go through it frame by frame, figure out where the players and ball are, and then try to guess what kind of shot was just played.
 
-I split the work into separate files so each file handles just one job. That way it's easier to fix or change one part without breaking everything else.
+The code is split into separate files so each one handles just one job. That way it's easy to fix or change one part without breaking everything else.
 
 ### How It Works Step by Step
 
@@ -27,22 +164,25 @@ I used a pre-trained model called YOLOv8 to find the players, ball, and rackets 
 
 I picked the "nano" (smallest) version of YOLO because it's fast enough to run on a normal laptop without a GPU.
 
+If YOLO fails to load, the code automatically falls back to a basic OpenCV color detector — it looks for a yellow-green round object for the ball, and large upright blobs for players.
+
 **2. Figuring out what shot was played (`classifier.py`)**
 
-Once I know where the ball is in each frame, I look at how the ball is moving — left, right, up, or down — and which side of the court the player is on. From that I make a simple guess:
+Once I know where the ball is in each frame, I look at how it's moving — left, right, up, or down — and which side of the court the player is on. From that I make a simple guess:
 
 | What I see | Shot I call it |
 |---|---|
 | Ball going left to right, player on left | Forehand |
 | Ball going right to left, player on left | Backhand |
 | Ball coming sharply downward from high up | Smash / Serve |
-| Can't tell | Unclassified |
+| Ball going upward | Lob |
+| Can't tell | Unknown |
 
-I also made sure it doesn't count the same shot 10 times — once a shot is detected, it waits a bit before looking for the next one.
+I also made sure it doesn't count the same shot 10 times — once a shot is saved, the system ignores everything for the next half second or so.
 
 **3. Putting it all together (`pipeline.py`)**
 
-This file just connects everything. It reads the video, sends each frame to the detector, sends the result to the classifier, draws labels on the frame, and saves everything to a file. Think of it as the manager that tells everyone else what to do.
+This file connects everything. It reads the video, sends each frame to the detector, sends the result to the classifier, draws labels on the frame, and saves everything to a file. Think of it as the manager that tells everyone else what to do.
 
 ```
 Video → detect players/ball → classify shot → draw on frame → save output
@@ -50,47 +190,34 @@ Video → detect players/ball → classify shot → draw on frame → save outpu
 
 **4. Counting and stats (`analytics.py`)**
 
-After the video is done, this file adds everything up — how many forehands, how many backhands, how fast the ball was moving on average, etc. It then saves a JSON and CSV file with all the results.
+After the video is done, this file adds everything up — how many forehands, how many backhands, how fast the ball was moving on average, shots per minute, which zone of the court shots happened in, and a timeline of shots every 10 seconds.
 
 **5. Drawing on the video (`visualizer.py`)**
 
-This draws coloured boxes around the players and ball, shows the ball's path as a trail, and puts a label on screen when a shot is detected. It makes the output video look nice and easy to understand.
+This draws coloured boxes around players and the ball, shows the ball's path as a fading trail, and puts a label on screen when a shot is detected. It makes the output video easy to understand at a glance.
 
-**Tools I Used**
+### Tools Used
 
 | Tool | What I used it for |
 |---|---|
 | Python | Main programming language |
 | OpenCV | Reading/writing video and drawing on frames |
-| YOLOv8 | Detecting players, ball, rackets |
-| NumPy | Basic math calculations |
-| Pandas | Saving data to CSV |
-| tqdm | Showing a progress bar in the terminal |
+| YOLOv8 (Ultralytics) | Detecting players, ball, rackets |
+| NumPy | Math calculations (speed, direction) |
+| Pandas / csv | Saving data to CSV |
+| tqdm | Progress bar in terminal |
 
----
+### What Was Simplified
 
-## System Architecture
+The original version of this code had extra complexity that wasn't needed for the core task. Here's what was removed to keep it clean:
 
-```
-shot/
-├── src/
-│   ├── detector.py       # finds players and ball
-│   ├── classifier.py     # guesses the shot type
-│   ├── pipeline.py       # runs everything in order
-│   ├── analytics.py      # counts and stats
-│   ├── visualizer.py     # draws on frames
-│   └── __init__.py
-├── models/               # YOLO weights go here (yolov8n.pt)
-├── data/                 # your input video goes here
-├── outputs/              # results saved here (JSON, CSV, video)
-├── main.py               # run this to start
-└── requirements.txt
-```
+- **Removed MediaPipe pose estimation** — it added 60+ lines and rarely improved results over the simpler racket-position approach
+- **Removed `class_id` from Detection** — the class name is enough, the number isn't needed anywhere
+- **Removed `BallTracker.arc()`** — the simpler `is_going_up()` check covers the same logic
+- **Removed `confidence` score from ShotEvent** — it wasn't being used in any output
+- **Removed verbose debug logging** — kept only essential info logs
 
-Run command:
-```bash
-python main.py --video data/match.mp4 --model models/yolov8n.pt --conf 0.35
-```
+Everything the assignment asks for still works: detection, classification of 3+ shot types, player association, JSON/CSV output, and annotated video.
 
 ---
 
